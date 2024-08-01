@@ -216,7 +216,8 @@ int ObWrCollector::collect_ash()
   int32_t svr_port;
   bool is_cache_hit = false;
 
-  if (snapshot_begin_time_ < snapshot_end_time_) {
+  LOG_ERROR("lianhua collect ash begin", K(snap_id_), K(tenant_id), K(snapshot_begin_time_), K(snapshot_end_time_));
+  if (snapshot_begin_time_ > snapshot_end_time_) {
     LOG_WARN("outdated snapshot", K(snap_id_), K(snapshot_begin_time_), K(snapshot_end_time_), K(timeout_ts_));
   } else if (OB_FAIL(GCTX.location_service_->vtable_get(
         MTL_ID(),
@@ -229,7 +230,7 @@ int ObWrCollector::collect_ash()
     SMART_VAR(ObISQLClient::ReadResult, res)
     {
       // iterate every partition
-      for (int64_t i = 0; i < OB_SUCC(ret) && i < part_locations.count(); i++) {
+      for (int64_t i = 0; OB_SUCC(ret) && i < part_locations.count(); i++) {
         ObMySQLResult *result = nullptr;
         res.reuse();
         sql.reuse();
@@ -1445,8 +1446,8 @@ int ObWrCollector::get_begin_interval_time(int64_t &begin_interval_time)
       ret = OB_ERR_UNEXPECTED;
       LOG_WARN("GCTX.sql_proxy_ is null", K(ret));
     } else if (OB_FAIL(sql.assign_fmt("SELECT /*+ WORKLOAD_REPOSITORY */ time_to_usec(END_INTERVAL_TIME) FROM %s where "
-                                      "tenant_id=%ld order by snap_id desc limit 1",
-                   OB_WR_SNAPSHOT_TNAME, tenant_id))) {
+                                      "tenant_id=%ld and snap_id != %ld order by snap_id desc limit 1",
+                   OB_WR_SNAPSHOT_TNAME, tenant_id, snap_id_))) {
       LOG_WARN("failed to format sql", KR(ret));
     } else if (OB_FAIL(
                    GCTX.sql_proxy_->read(res, gen_meta_tenant_id(tenant_id), sql.ptr()))) {
@@ -1457,10 +1458,10 @@ int ObWrCollector::get_begin_interval_time(int64_t &begin_interval_time)
     } else if (OB_FAIL(result->next())) {
       if (OB_ITER_END == ret) {
         // no record in __wr_snapshot table. this is the first time we take snapshot in this
-        // cluster.
+        // cluster, just use snapshot_begin_time_ in wr request.
         ret = OB_SUCCESS;
-        begin_interval_time = 0;
-        LOG_WARN("first time to take wr snapshot in this cluster", K(tenant_id), K(begin_interval_time));
+        begin_interval_time = snapshot_begin_time_;
+        LOG_WARN("no scheduled wr snapshot in this cluster", K(tenant_id), K(begin_interval_time));
       } else {
         LOG_WARN("get next result failed", KR(ret), K(sql));
       }

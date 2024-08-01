@@ -189,12 +189,12 @@ int ObWrAsyncSnapshotTaskP::process()
         LOG_WARN("wr snapshot task tenant_id mismatch!", K(MTL_ID()), K(snapshot_arg));
       } else if (OB_FAIL(collector.init())) {
         LOG_WARN("failed to init wr collector", K(ret));
+      } else if (OB_UNLIKELY(MTL_ID() != snapshot_arg.get_tenant_id())) {
+        ret = OB_ERR_UNEXPECTED;
+        LOG_WARN("wr snapshot should be processed by the same tenant", K(MTL_ID()), K(snapshot_arg));
       } else if (snapshot_arg.get_snap_id() == -1) {  // snapshot ahead
-        if (OB_UNLIKELY(MTL_ID() != snapshot_arg.get_tenant_id())) {
-          ret = OB_ERR_UNEXPECTED;
-          LOG_WARN("wr snapshot ahead task should be trigger by sys tenant!", K(MTL_ID()), K(snapshot_arg));        
-        } else if (OB_FAIL(collector.collect_ash())) {
-          LOG_WARN("failed to wr snapshot ahead", K(ret), K(snapshot_arg), K(MTL_ID()));
+        if (OB_FAIL(collector.collect_ash())) {
+          LOG_WARN("failed to take wr snapshot ahead", K(ret), K(snapshot_arg), K(MTL_ID()));
         }
       } else if (OB_FAIL(collector.collect())) {  // scheduled snapshot
         LOG_WARN("failed to collect wr data", K(ret), K(snapshot_arg), K(MTL_ID()));
