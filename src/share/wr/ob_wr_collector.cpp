@@ -216,7 +216,6 @@ int ObWrCollector::collect_ash()
   int32_t svr_port;
   bool is_cache_hit = false;
 
-  LOG_ERROR("lianhua collect ash begin", K(snap_id_), K(tenant_id), K(snapshot_begin_time_), K(snapshot_end_time_));
   if (snapshot_begin_time_ > snapshot_end_time_) {
     LOG_WARN("outdated snapshot", K(snap_id_), K(snapshot_begin_time_), K(snapshot_end_time_), K(timeout_ts_));
   } else if (OB_FAIL(GCTX.location_service_->vtable_get(

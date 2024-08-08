@@ -153,9 +153,25 @@ int ObWrAsyncSnapshotTaskP::process()
 
     // gurantee one snapshot task processing
     bool exit = true;
-    if (snapshot_arg.get_snap_id() == -1) {
+    if (snapshot_arg.get_snap_id() == -1 || snapshot_arg.get_task_type() == WrTaskType::USER_SNAPSHOT) {
       if (OB_FAIL(MTL(ObWorkloadRepositoryContext*)->try_lock())) {
-        LOG_WARN("snapshot ahead request failed to lock", K(arg));
+        if (snapshot_arg.get_snap_id() == -1) {
+          LOG_WARN("snapshot ahead request failed to lock", K(arg));
+        } else {
+          LOG_WARN("manual snapshot request failed to lock", K(arg));
+          status = ObWrSnapshotStatus::FAILED;
+          int tmp_ret = OB_SUCCESS;
+          if (OB_TMP_FAIL(WorkloadRepositoryTask::modify_tenant_snapshot_status_and_startup_time(
+                  snapshot_arg.get_snap_id(), snapshot_arg.get_tenant_id(), GCONF.cluster_id,
+                  GCONF.self_addr_, GCTX.start_service_time_, status))) {
+            LOG_WARN("failed to modify snapshot info", KR(tmp_ret), K(snapshot_arg), K(status));
+          } else if (is_sys_tenant(snapshot_arg.get_tenant_id())) {
+            if (OB_TMP_FAIL(WorkloadRepositoryTask::update_snap_info_in_wr_control(snapshot_arg.get_tenant_id(),
+                    snapshot_arg.get_snap_id(), snapshot_arg.get_snapshot_end_time()))) {
+              LOG_WARN("failed to update wr control info", KR(tmp_ret), K(snapshot_arg));
+            }
+          }
+        }
       } else {
         exit = false;
       }
