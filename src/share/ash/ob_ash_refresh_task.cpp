@@ -19,6 +19,7 @@
 #include "share/wr/ob_wr_task.h"
 #include "share/wr/ob_wr_service.h"
 #include "share/location_cache/ob_location_service.h"
+#include "observer/ob_srv_network_frame.h"
 #include <cassert>
 
 using namespace oceanbase::common;
@@ -53,6 +54,9 @@ int ObAshRefreshTask::start()
                                  true /* repeat */))) {
     LOG_WARN("fail define timer schedule", K(ret));
   } else {
+    if (OB_FAIL(wr_proxy_.init(GCTX.net_frame_->get_req_transport()))) {
+      LOG_WARN("failed to init wr proxy", K(ret));
+    }
     LOG_INFO("AshRefresh init OK");
     last_scheduled_snapshot_time_ = ObTimeUtility::current_time();
     is_inited_ = true;
@@ -63,7 +67,7 @@ int ObAshRefreshTask::start()
 void ObAshRefreshTask::runTimerTask()
 {
   // don't disturb next scheduled and ahead snapshot
-  if (false) {
+  if (true) {
     int64_t task_timeout_ts = ObTimeUtility::current_time() + ASH_REFRESH_INTERVAL * 1000L * 1000L - ESTIMATE_PS_RESERVE_TIME;
     int ret = OB_SUCCESS;
     common::ObTimeGuard time_guard(__func__, ASH_REFESH_TIME);
@@ -85,8 +89,8 @@ void ObAshRefreshTask::runTimerTask()
         ret = OB_ERR_UNEXPECTED;
         LOG_WARN("GCTX.sql_proxy_ is null", K(ret));
       } else if (OB_FAIL(sql.assign_fmt("SELECT /*+ WORKLOAD_REPOSITORY */ time_to_usec(END_INTERVAL_TIME), snap_flag FROM %s where "
-                                        "snap_id=%d and tenant_id=%ld",
-                    OB_ALL_VIRTUAL_WR_SNAPSHOT_TNAME, -1, OB_SYS_TENANT_ID))) {
+                                        "snap_id=%ld and tenant_id=%ld",
+                    OB_ALL_VIRTUAL_WR_SNAPSHOT_TNAME, LAST_SNAPSHOT_RECORD_SNAP_ID, OB_SYS_TENANT_ID))) {
         LOG_WARN("failed to format sql", KR(ret));
       } else if (OB_FAIL(
                     sql_proxy->read(res, gen_meta_tenant_id(tenant_id), sql.ptr()))) {
@@ -150,7 +154,7 @@ void ObAshRefreshTask::runTimerTask()
             if (is_sys_tenant(tenant_id) || is_user_tenant(tenant_id)) {
               if (check_tenant_can_do_wr_task(tenant_id)) {
                 ObWrCreateSnapshotArg arg(
-                      tenant_id, -1, last_snapshot_end_time, ObTimeUtility::current_time(), task_timeout_ts);
+                      tenant_id, LAST_SNAPSHOT_RECORD_SNAP_ID, last_snapshot_end_time, ObTimeUtility::current_time(), task_timeout_ts);
                 if (OB_FAIL(GCTX.location_service_->get_leader(
                       GCONF.cluster_id, tenant_id, share::SYS_LS, false /*force_renew*/, leader))) {
                   LOG_WARN("fail to get ls locaiton leader", KR(ret), K(tenant_id));

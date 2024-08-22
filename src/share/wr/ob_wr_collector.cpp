@@ -41,7 +41,8 @@ ObWrCollector::ObWrCollector(int64_t snap_id, int64_t snapshot_begin_time,
     : snap_id_(snap_id),
       snapshot_begin_time_(snapshot_begin_time),
       snapshot_end_time_(snapshot_end_time),
-      timeout_ts_(snapshot_timeout_ts)
+      timeout_ts_(snapshot_timeout_ts),
+      snapshot_ahead_(false)
 {
   if (OB_UNLIKELY(snapshot_begin_time_ == snapshot_end_time_)) {
     snapshot_begin_time_ = 0;
@@ -57,6 +58,9 @@ int ObWrCollector::init()
   int ret = OB_SUCCESS;
   int64_t begin_interval_time = 0;
   const uint64_t tenant_id = MTL_ID();
+  if (snap_id_ == LAST_SNAPSHOT_RECORD_SNAP_ID) {
+    snapshot_ahead_ = true;
+  }
   SMART_VAR(ObISQLClient::ReadResult, res)
   {
     ObMySQLResult *result = nullptr;
@@ -64,8 +68,8 @@ int ObWrCollector::init()
       ret = OB_ERR_UNEXPECTED;
       LOG_WARN("GCTX.sql_proxy_ is null", K(ret));
     } else if (OB_FAIL(sql.assign_fmt("SELECT /*+ WORKLOAD_REPOSITORY */ time_to_usec(END_INTERVAL_TIME) FROM %s where "
-                                      "snap_id=%d and tenant_id=%ld",
-                  OB_WR_SNAPSHOT_TNAME, -1, tenant_id))) {
+                                      "snap_id=%ld and tenant_id=%ld",
+                  OB_WR_SNAPSHOT_TNAME, LAST_SNAPSHOT_RECORD_SNAP_ID, tenant_id))) {
       LOG_WARN("failed to format sql", KR(ret));
     } else if (OB_FAIL(
                   GCTX.sql_proxy_->read(res, gen_meta_tenant_id(tenant_id), sql.ptr()))) {
@@ -86,9 +90,9 @@ int ObWrCollector::init()
     }
     snapshot_begin_time_ = begin_interval_time;
   }
-  // read from OB_WORKLOAD_REPOSITORY_SNAP_ID_SEQNENCE to get snap id for ahead records
-  if (snap_id_ == -1) {
-    ret = get_cur_snapshot_id(snap_id_);
+  // read from OB_WR_SNAPSHOT_TNAME to get snap id for ahead records
+  if (snap_id_ == LAST_SNAPSHOT_RECORD_SNAP_ID) {
+    ret = get_cur_snapshot_id_for_ahead_snapshot(snap_id_);
   }
   return ret;
 }
@@ -1087,20 +1091,20 @@ int ObWrCollector::update_last_snapshot_end_time()
       ret = OB_TIMEOUT;
       LOG_WARN("wr snapshot timeout", KR(ret), K_(timeout_ts));
     } else if (OB_FAIL(dml_splicer.add_pk_column("tenant_id", tenant_id))) {
-      LOG_WARN("failed to add tenant_id", KR(ret), K(-1));
-    } else if (OB_FAIL(dml_splicer.add_pk_column("cluster_id", -1))) {
-      LOG_WARN("failed to add column cluster_id", KR(ret), K(-1));
-    } else if (OB_FAIL(dml_splicer.add_pk_column("snap_id", -1))) {
-      LOG_WARN("failed to add column SNAP_ID", KR(ret), K(-1));
+      LOG_WARN("failed to add tenant_id", KR(ret), K(tenant_id));
+    } else if (OB_FAIL(dml_splicer.add_pk_column("cluster_id", LAST_SNAPSHOT_RECORD_CLUSTER_ID))) {
+      LOG_WARN("failed to add column cluster_id", KR(ret), K(LAST_SNAPSHOT_RECORD_CLUSTER_ID));
+    } else if (OB_FAIL(dml_splicer.add_pk_column("snap_id", LAST_SNAPSHOT_RECORD_SNAP_ID))) {
+      LOG_WARN("failed to add column SNAP_ID", KR(ret), K(LAST_SNAPSHOT_RECORD_SNAP_ID));
     } else if (OB_FAIL(dml_splicer.add_pk_column("svr_ip", ""))) {
       LOG_WARN("failed to add column svr_ip", KR(ret), K(""));
-    } else if (OB_FAIL(dml_splicer.add_pk_column("svr_port", -1))) {
-      LOG_WARN("failed to add column svr_port", KR(ret));
+    } else if (OB_FAIL(dml_splicer.add_pk_column("svr_port", LAST_SNAPSHOT_RECORD_SVR_PORT))) {
+      LOG_WARN("failed to add column svr_port", KR(ret), K(LAST_SNAPSHOT_RECORD_SVR_PORT));
     } else if (OB_FAIL(dml_splicer.add_time_column("begin_interval_time", snapshot_begin_time_))) {
       LOG_WARN("failed to add column begin_interval_time", KR(ret), K(snapshot_begin_time_));
     } else if (OB_FAIL(dml_splicer.add_time_column("end_interval_time", snapshot_end_time_))) {
       LOG_WARN("failed to add column end_interval_time", KR(ret), K(snapshot_end_time_));
-    } else if (OB_FAIL(dml_splicer.add_column("snap_flag", snap_id_ == -1 
+    } else if (OB_FAIL(dml_splicer.add_column("snap_flag", snapshot_ahead_
                                               ? ObWrSnapshotFlag::LAST_AHEAD_SNAPSHOT 
                                               : ObWrSnapshotFlag::LAST_SCHEDULED_SNAPSHOT))) {
       LOG_WARN("failed to add column snap_flag", KR(ret));
@@ -1394,7 +1398,7 @@ int ObWrCollector::fetch_snapshot_id_sequence_curval(int64_t &snap_id)
   return ret;
 }
 
-int ObWrCollector::get_cur_snapshot_id(int64_t &snap_id)
+int ObWrCollector::get_cur_snapshot_id_for_ahead_snapshot(int64_t &snap_id)
 {
   int ret = OB_SUCCESS;
   // we can't access sequence.currval in one new session
@@ -1416,17 +1420,15 @@ int ObWrCollector::get_cur_snapshot_id(int64_t &snap_id)
       ret = OB_ERR_UNEXPECTED;
       LOG_WARN("failed to get mysql result", KR(ret), K(sql));
     } else if (OB_FAIL(result->next())) {
-      if (OB_ITER_END == ret) {
+      LOG_WARN("get next result failed", KR(ret), K(sql));
+    } else if (OB_FAIL(result->get_int(0L, snap_id))) {
+      if (ret == OB_ERR_NULL_VALUE) {
         // no record in __wr_snapshot table. this is the first time we take snapshot in this
         // cluster.
         ret = OB_SUCCESS;
-        snap_id = 0;
-        LOG_WARN("first time to take wr snapshot in this cluster", K(snap_id));
-      } else {
-        LOG_WARN("get next result failed", KR(ret), K(sql));
+        snap_id = 1;
+        LOG_WARN("first time to take wr snapshot in this cluster", K(snap_id), K(ret));
       }
-    } else if (OB_FAIL(result->get_int(0L, snap_id))) {
-      LOG_WARN("get column fail", KR(ret), K(sql));
     }
   }
 

@@ -402,6 +402,7 @@ int WorkloadRepositoryTask::fetch_snapshot_id_sequence_nextval(int64_t &snap_id)
 int WorkloadRepositoryTask::get_begin_interval_time(int64_t &begin_interval_time)
 {
   int ret = OB_SUCCESS;
+  int64_t cluster_id = GCONF.cluster_id;
   ObSqlString sql;
   SMART_VAR(ObISQLClient::ReadResult, res)
   {
@@ -410,8 +411,8 @@ int WorkloadRepositoryTask::get_begin_interval_time(int64_t &begin_interval_time
       ret = OB_ERR_UNEXPECTED;
       LOG_WARN("GCTX.sql_proxy_ is null", K(ret));
     } else if (OB_FAIL(sql.assign_fmt("SELECT /*+ WORKLOAD_REPOSITORY */ time_to_usec(END_INTERVAL_TIME) FROM %s where "
-                                      "tenant_id=%ld order by snap_id desc limit 1",
-                   OB_WR_SNAPSHOT_TNAME, OB_SYS_TENANT_ID))) {
+                                      "tenant_id=%ld and cluster_id = %ld and snap_id != %ld order by snap_id desc limit 1",
+                   OB_WR_SNAPSHOT_TNAME, OB_SYS_TENANT_ID, cluster_id, LAST_SNAPSHOT_RECORD_SNAP_ID))) {
       LOG_WARN("failed to format sql", KR(ret));
     } else if (OB_FAIL(
                    GCTX.sql_proxy_->read(res, gen_meta_tenant_id(OB_SYS_TENANT_ID), sql.ptr()))) {

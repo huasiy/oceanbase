@@ -353,13 +353,14 @@ private:
   int collect_sql_plan();
   int write_to_wr(ObDMLSqlSplicer &dml_splicer, const char *table_name, int64_t tenant_id);
   int fetch_snapshot_id_sequence_curval(int64_t &snap_id);
-  int get_cur_snapshot_id(int64_t &snap_id);
+  int get_cur_snapshot_id_for_ahead_snapshot(int64_t &snap_id);
   int get_begin_interval_time(int64_t &begin_interval_time);
   int update_last_snapshot_end_time();
   int64_t snap_id_;
   int64_t snapshot_begin_time_;
   int64_t snapshot_end_time_;
   int64_t timeout_ts_;
+  bool snapshot_ahead_;
 };
 
 class ObWrDeleter

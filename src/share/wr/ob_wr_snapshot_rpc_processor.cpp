@@ -153,9 +153,9 @@ int ObWrAsyncSnapshotTaskP::process()
 
     // gurantee one snapshot task processing
     bool exit = true;
-    if (snapshot_arg.get_snap_id() == -1 || snapshot_arg.get_task_type() == WrTaskType::USER_SNAPSHOT) {
+    if (snapshot_arg.get_snap_id() == LAST_SNAPSHOT_RECORD_SNAP_ID || snapshot_arg.get_task_type() == WrTaskType::USER_SNAPSHOT) {
       if (OB_FAIL(MTL(ObWorkloadRepositoryContext*)->try_lock())) {
-        if (snapshot_arg.get_snap_id() == -1) {
+        if (snapshot_arg.get_snap_id() == LAST_SNAPSHOT_RECORD_SNAP_ID) {
           LOG_WARN("snapshot ahead request failed to lock", K(arg));
         } else {
           LOG_WARN("manual snapshot request failed to lock", K(arg));
@@ -205,10 +205,7 @@ int ObWrAsyncSnapshotTaskP::process()
         LOG_WARN("wr snapshot task tenant_id mismatch!", K(MTL_ID()), K(snapshot_arg));
       } else if (OB_FAIL(collector.init())) {
         LOG_WARN("failed to init wr collector", K(ret));
-      } else if (OB_UNLIKELY(MTL_ID() != snapshot_arg.get_tenant_id())) {
-        ret = OB_ERR_UNEXPECTED;
-        LOG_WARN("wr snapshot should be processed by the same tenant", K(MTL_ID()), K(snapshot_arg));
-      } else if (snapshot_arg.get_snap_id() == -1) {  // snapshot ahead
+      } else if (snapshot_arg.get_snap_id() == LAST_SNAPSHOT_RECORD_SNAP_ID) {  // snapshot ahead
         if (OB_FAIL(collector.collect_ash())) {
           LOG_WARN("failed to take wr snapshot ahead", K(ret), K(snapshot_arg), K(MTL_ID()));
         }
@@ -216,7 +213,7 @@ int ObWrAsyncSnapshotTaskP::process()
         LOG_WARN("failed to collect wr data", K(ret), K(snapshot_arg), K(MTL_ID()));
       }
       // update scheduled snapshot info
-      if (snapshot_arg.get_snap_id() != -1) {
+      if (snapshot_arg.get_snap_id() != LAST_SNAPSHOT_RECORD_SNAP_ID) {
         if (OB_FAIL(ret)) {
           status = ObWrSnapshotStatus::FAILED;
         } else {
